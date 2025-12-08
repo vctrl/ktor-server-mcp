@@ -8,7 +8,6 @@ import io.ktor.server.routing.RoutingContext
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.application.ApplicationCall
-import io.ktor.server.sessions.CurrentSession
 import io.ktor.server.sessions.sessions
 import io.ktor.server.sse.ServerSSESession
 import io.ktor.server.sse.sse
@@ -52,7 +51,7 @@ public fun errorResult(message: String): CallToolResult =
     CallToolResult(content = listOf(TextContent(text = message)), isError = true)
 
 /**
- * Context for tool handlers. Provides access to arguments, sessions, and principal.
+ * Context for tool handlers. Provides access to arguments and the Ktor call.
  */
 @KtorDsl
 public class ToolScope(
@@ -60,10 +59,7 @@ public class ToolScope(
     public val args: Map<String, Any?>,
     /** The Ktor ApplicationCall for accessing sessions, principal, etc. */
     public val call: ApplicationCall
-) {
-    /** Shortcut for call.sessions */
-    public val sessions: CurrentSession get() = call.sessions
-}
+)
 
 /**
  * Scope for configuring the MCP ServerSession with access to Ktor call context.
@@ -74,10 +70,7 @@ public class ConfigureScope(
     public val server: ServerSession,
     /** The Ktor ApplicationCall for accessing sessions, principal, etc. */
     public val call: ApplicationCall
-) {
-    /** Shortcut for call.sessions */
-    public val sessions: CurrentSession get() = call.sessions
-}
+)
 
 /**
  * Configuration for an MCP endpoint.
@@ -92,8 +85,6 @@ public class McpConfig internal constructor(
      */
     public val call: ApplicationCall
 ) {
-    /** Shortcut for call.sessions */
-    public val sessions: CurrentSession get() = call.sessions
     /** Server name shown to MCP clients. */
     public var name: String = "mcp-server"
 
@@ -125,7 +116,7 @@ public class McpConfig internal constructor(
      * Example:
      * ```kotlin
      * mcp("/mcp") {
-     *     val user = sessions.get<UserSession>()
+     *     val user = call.sessions.get<UserSession>()
      *
      *     tool("whoami", "Returns current user") {
      *         textResult("Hello, ${user?.name ?: "stranger"}!")
@@ -151,13 +142,13 @@ public class McpConfig internal constructor(
      * Configure the MCP ServerSession directly using SDK methods.
      *
      * Provides full access to SDK features via [ConfigureScope.server].
-     * Ktor sessions available via [ConfigureScope.sessions].
+     * Ktor call available via [ConfigureScope.call].
      *
      * Example:
      * ```kotlin
      * mcp("/mcp") {
      *     configure {
-     *         val user = sessions.get<UserSession>()
+     *         val user = call.sessions.get<UserSession>()
      *
      *         server.addTool("advanced", "Advanced tool", ToolSchema()) { request ->
      *             CallToolResult(content = listOf(TextContent("Result")))

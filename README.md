@@ -10,7 +10,7 @@ The official MCP Kotlin SDK provides excellent protocol support but doesn't inte
 This library bridges that gap:
 
 - **Works inside `authenticate {}`** - Respects Ktor's route hierarchy, so MCP endpoints can be protected by any auth provider.
-- **Session & Principal access** - Read user-specific data via `sessions` and `call.principal<T>()`.
+- **Session & Principal access** - Read user-specific data via `call.sessions` and `call.principal<T>()`.
 - **Designed for ktor-server-oauth** - Seamlessly integrates with OAuth provision flows.
 - **Idiomatic Kotlin DSL** - Clean `tool()` syntax with automatic error handling.
 - **Full MCP Kotlin SDK passthrough** - Use `configure {}` for prompts, resources, and all official SDK features.
@@ -65,7 +65,7 @@ data class UserSession(val apiKey: String, val name: String)
 routing {
     authenticate {
         mcp("/mcp") {
-            val user = sessions.get<UserSession>()
+            val user = call.sessions.get<UserSession>()
             val principal = call.principal<UserPrincipal>()
 
             tool("whoami", "Returns current user") {
@@ -138,7 +138,7 @@ fun Application.module() {
 
         authenticate {
             mcp("/mcp") {
-                val session = sessions.get<ApiKeySession>()
+                val session = call.sessions.get<ApiKeySession>()
 
                 tool("query", "Query using user's API key") {
                     val result = queryWithKey(session?.apiKey)
@@ -163,7 +163,7 @@ mcp("/mcp") {
     }
 
     configure {
-        val user = sessions.get<UserSession>()
+        val user = call.sessions.get<UserSession>()
 
         server.addPrompt("summarize", "Summarizes text") { request ->
             GetPromptResult(messages = listOf(...))
@@ -197,7 +197,6 @@ Registers MCP SSE and POST endpoints at the given path.
 | `icons` | Server icons (optional) |
 | `capabilities` | `ServerCapabilities` - auto-set when using `tool()` |
 | `call` | Ktor `ApplicationCall` for sessions, principal, etc. |
-| `sessions` | Shortcut for `call.sessions` |
 
 ### tool()
 
@@ -218,7 +217,6 @@ Register a tool. Use `textResult()` helper for simple responses. Errors are caug
 |----------|-------------|
 | `args` | Tool arguments as `Map<String, Any?>` |
 | `call` | Ktor `ApplicationCall` for sessions, principal, etc. |
-| `sessions` | Shortcut for `call.sessions` |
 
 ### Helper Functions
 
@@ -237,7 +235,6 @@ fun configure(block: suspend ConfigureScope.() -> Unit)
 Direct SDK access. `ConfigureScope` provides:
 - `server` - the MCP `ServerSession` for SDK methods
 - `call` - Ktor `ApplicationCall`
-- `sessions` - shortcut for `call.sessions`
 
 ## License
 
