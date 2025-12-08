@@ -131,7 +131,7 @@ fun Application.module() {
         provision {
             get { call.respondHtml { apiKeyForm() } }
             post {
-                sessions.set(ApiKeySession(call.receiveParameters()["api_key"]!!))
+                call.sessions.set(ApiKeySession(call.receiveParameters()["api_key"]!!))
                 complete()
             }
         }
