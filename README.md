@@ -6,20 +6,26 @@ A thin wrapper around the official [MCP Kotlin SDK](https://github.com/modelcont
 
 ## Why This Library?
 
-The official MCP Kotlin SDK provides excellent protocol support but doesn't integrate with Ktor sessions or authentication blocks. This library bridges that gap:
+The official MCP Kotlin SDK provides excellent protocol support but doesn't integrate with Ktor sessions or authentication blocks. 
+This library bridges that gap:
 
 - **Works inside `authenticate {}`** - Respects Ktor's route hierarchy, so MCP endpoints can be protected by any auth provider.
 - **Session & Principal access** - Read user-specific data via `sessions` and `call.principal<T>()`.
 - **Designed for ktor-server-oauth** - Seamlessly integrates with OAuth provision flows.
 - **Idiomatic Kotlin DSL** - Clean `tool()` syntax with automatic error handling.
-- **Full SDK access** - Use `configure {}` for prompts, resources, and advanced features.
+- **Full MCP Kotlin SDK passthrough** - Use `configure {}` for prompts, resources, and all official SDK features.
 
 ## Installation
+
+This library was built to bring MCP support to [ktor-server-oauth](https://github.com/vctrl/ktor-server-oauth), enabling OAuth-protected MCP servers with session-aware tools.
 
 ```kotlin
 dependencies {
     implementation("com.vcontrol:ktor-server-mcp:0.1.0")
     implementation("io.modelcontextprotocol:kotlin-sdk:0.8.1")
+
+    // Recommended: OAuth 2.0 support
+    implementation("com.vcontrol:ktor-server-oauth:0.4.6")
 }
 ```
 
