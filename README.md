@@ -2,16 +2,17 @@
 
 Session-aware MCP server integration for Ktor.
 
-A thin wrapper around the official [MCP Kotlin SDK](https://github.com/modelcontextprotocol/kotlin-sdk), designed to work with [ktor-server-oauth](https://github.com/vctrl/ktor-server-oauth) and any Ktor `authenticate {}` flow. Build MCP servers where tools have access to authenticated user sessions.
+A thin wrapper around the official [MCP Kotlin SDK](https://github.com/modelcontextprotocol/kotlin-sdk), designed to work with [ktor-server-oauth](https://github.com/vctrl/ktor-server-oauth) and any Ktor `authenticate {}` flow. Build MCP servers where tools have access to authenticated user sessions and principals.
 
 ## Why This Library?
 
 The official MCP Kotlin SDK provides excellent protocol support but doesn't integrate with Ktor sessions or authentication blocks. This library bridges that gap:
 
-- **Works inside `authenticate {}`** - The SDK registers routes at the application root. This library respects Ktor's route hierarchy, so MCP endpoints can be protected by any auth provider.
-- **Session access** - Read user-specific data (API keys, preferences, credentials) collected during OAuth or other auth flows.
+- **Works inside `authenticate {}`** - Respects Ktor's route hierarchy, so MCP endpoints can be protected by any auth provider.
+- **Session & Principal access** - Read user-specific data via `sessions` and `call.principal<T>()`.
 - **Designed for ktor-server-oauth** - Seamlessly integrates with OAuth provision flows.
-- **Thin wrapper** - Uses SDK methods directly (`addTool`, `addPrompt`, `addResource`, etc.) without proprietary abstractions.
+- **Idiomatic Kotlin DSL** - Clean `tool()` syntax with automatic error handling.
+- **Full SDK access** - Use `configure {}` for prompts, resources, and advanced features.
 
 ## Installation
 
@@ -36,13 +37,10 @@ fun Application.module() {
             mcp("/mcp") {
                 name = "my-server"
                 version = "1.0.0"
-                capabilities = ServerCapabilities(tools = ServerCapabilities.Tools())
 
-                configure {
-                    addTool("greet", "Greets the user", ToolSchema()) { request ->
-                        val name = request.params.arguments?.get("name")?.toString() ?: "World"
-                        CallToolResult(content = listOf(TextContent(text = "Hello, $name!")))
-                    }
+                tool("greet", "Greets the user") {
+                    val name = args["name"] ?: "World"
+                    textResult("Hello, $name!")
                 }
             }
         }
@@ -50,37 +48,61 @@ fun Application.module() {
 }
 ```
 
-## Session Access
+## Session & Principal Access
 
-Access Ktor sessions from the config block - useful for user-specific data collected during OAuth:
+Access authenticated user data from your tools:
 
 ```kotlin
 @Serializable
-data class UserSession(val apiKey: String, val username: String)
+data class UserSession(val apiKey: String, val name: String)
 
 routing {
     authenticate {
         mcp("/mcp") {
-            capabilities = ServerCapabilities(tools = ServerCapabilities.Tools())
+            val user = sessions.get<UserSession>()
+            val principal = call.principal<UserPrincipal>()
 
-            // Session captured at connection time
-            val userSession = sessions.get<UserSession>()
+            tool("whoami", "Returns current user") {
+                textResult("Hello, ${user?.name ?: principal?.name ?: "stranger"}!")
+            }
 
-            server {
-                addTool("whoami", "Returns the current user", ToolSchema()) { _ ->
-                    CallToolResult(
-                        content = listOf(TextContent(text = userSession?.username ?: "Unknown"))
-                    )
-                }
-
-                addTool("call_api", "Calls external API with user's key", ToolSchema()) { _ ->
-                    val result = externalApi.call(userSession?.apiKey)
-                    CallToolResult(content = listOf(TextContent(text = result)))
-                }
+            tool("call_api", "Calls API with user's key") {
+                val endpoint = args["endpoint"] ?: "/default"
+                val result = apiClient.call(endpoint, user?.apiKey)
+                textResult(result)
             }
         }
     }
 }
+```
+
+## Helper Functions
+
+Simple helpers for common response patterns:
+
+```kotlin
+// Single text result
+textResult("Hello!")
+
+// Multiple text results
+textResult("Line 1", "Line 2", "Line 3")
+
+// Error result
+errorResult("Something went wrong")
+```
+
+## Error Handling
+
+Exceptions are automatically caught and returned as error results:
+
+```kotlin
+tool("risky", "Might fail") {
+    if (args["value"] == null) {
+        throw IllegalArgumentException("value is required")
+    }
+    textResult("Success!")
+}
+// Errors returned as: CallToolResult(isError = true, content = "Error: value is required")
 ```
 
 ## With ktor-server-oauth
@@ -100,7 +122,6 @@ fun Application.module() {
     }
 
     routing {
-        // Collect API key during OAuth flow
         provision {
             get { call.respondHtml { apiKeyForm() } }
             post {
@@ -109,17 +130,13 @@ fun Application.module() {
             }
         }
 
-        // MCP with session access
         authenticate {
             mcp("/mcp") {
-                capabilities = ServerCapabilities(tools = ServerCapabilities.Tools())
                 val session = sessions.get<ApiKeySession>()
 
-                configure {
-                    addTool("query", "Query using user's API key", ToolSchema()) { _ ->
-                        val result = queryWithKey(session?.apiKey)
-                        CallToolResult(content = listOf(TextContent(text = result)))
-                    }
+                tool("query", "Query using user's API key") {
+                    val result = queryWithKey(session?.apiKey)
+                    textResult(result)
                 }
             }
         }
@@ -128,6 +145,30 @@ fun Application.module() {
 ```
 
 See [ktor-oauth-mcp-samples](https://github.com/vctrl/ktor-oauth-mcp-samples) for complete working examples.
+
+## SDK Passthrough
+
+Use `configure {}` for full SDK access (prompts, resources, advanced features):
+
+```kotlin
+mcp("/mcp") {
+    tool("hello", "Says hello") {
+        textResult("Hello!")
+    }
+
+    configure {
+        val user = sessions.get<UserSession>()
+
+        server.addPrompt("summarize", "Summarizes text") { request ->
+            GetPromptResult(messages = listOf(...))
+        }
+
+        server.addResource("config://settings", "User settings") { request ->
+            ReadResourceResult(contents = listOf(...))
+        }
+    }
+}
+```
 
 ## API Reference
 
@@ -148,16 +189,49 @@ Registers MCP SSE and POST endpoints at the given path.
 | `title` | Human-readable title (optional) |
 | `websiteUrl` | Server website URL (optional) |
 | `icons` | Server icons (optional) |
-| `capabilities` | `ServerCapabilities` - configure based on features you register |
-| `sessions` | Ktor `CurrentSession` for accessing session data |
+| `capabilities` | `ServerCapabilities` - auto-set when using `tool()` |
+| `call` | Ktor `ApplicationCall` for sessions, principal, etc. |
+| `sessions` | Shortcut for `call.sessions` |
+
+### tool()
+
+```kotlin
+fun tool(
+    name: String,
+    description: String,
+    inputSchema: ToolSchema = ToolSchema(),
+    handler: suspend ToolScope.() -> CallToolResult
+)
+```
+
+Register a tool. Use `textResult()` helper for simple responses. Errors are caught automatically.
+
+### ToolScope
+
+| Property | Description |
+|----------|-------------|
+| `args` | Tool arguments as `Map<String, Any?>` |
+| `call` | Ktor `ApplicationCall` for sessions, principal, etc. |
+| `sessions` | Shortcut for `call.sessions` |
+
+### Helper Functions
+
+```kotlin
+fun textResult(text: String): CallToolResult
+fun textResult(vararg texts: String): CallToolResult
+fun errorResult(message: String): CallToolResult
+```
 
 ### configure {}
 
 ```kotlin
-fun configure(block: suspend ServerSession.() -> Unit)
+fun configure(block: suspend ConfigureScope.() -> Unit)
 ```
 
-Configure the MCP `ServerSession` directly. Full access to all SDK methods: `addTool()`, `addPrompt()`, `addResource()`, `setRequestHandler()`, etc.
+Direct SDK access. `ConfigureScope` provides:
+- `server` - the MCP `ServerSession` for SDK methods
+- `call` - Ktor `ApplicationCall`
+- `sessions` - shortcut for `call.sessions`
 
 ## License
 
