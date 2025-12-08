@@ -8,7 +8,7 @@ plugins {
 }
 
 val versionProps = Properties().apply {
-    file("version.props").inputStream().use { load(it) }
+    file("version.properties").inputStream().use { load(it) }
 }
 
 group = "com.vcontrol"
