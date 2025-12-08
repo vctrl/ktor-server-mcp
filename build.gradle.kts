@@ -1,18 +1,12 @@
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.kotlinJvm)
     `java-library`
-    `maven-publish`
-    signing
-}
-
-val versionProps = Properties().apply {
-    file("version.properties").inputStream().use { load(it) }
+    id("com.vanniktech.maven.publish") version "0.30.0"
 }
 
 group = "com.vcontrol"
-version = versionProps.getProperty("version")
+version = file("version.properties")
+    .readLines().first { it.startsWith("version=") }.substringAfter("=")
 
 kotlin {
     jvmToolchain(22)
@@ -36,45 +30,35 @@ dependencies {
     testRuntimeOnly(libs.slf4jSimple)
 }
 
-java {
-    withSourcesJar()
-    withJavadocJar()
-}
+// Maven Central publishing via vanniktech plugin
+mavenPublishing {
+    publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
+    signAllPublications()
 
-publishing {
-    publications {
-        create<MavenPublication>("maven") {
-            from(components["java"])
+    pom {
+        name.set("ktor-server-mcp")
+        description.set("Session-aware MCP server integration for Ktor. A thin wrapper around the official MCP Kotlin SDK.")
+        url.set("https://github.com/vctrl/ktor-server-mcp")
 
-            pom {
-                name.set("ktor-server-mcp")
-                description.set("Ktor integration for MCP (Model Context Protocol) with session support")
-                url.set("https://github.com/vctrl/ktor-server-mcp")
-
-                licenses {
-                    license {
-                        name.set("Apache License, Version 2.0")
-                        url.set("https://www.apache.org/licenses/LICENSE-2.0")
-                    }
-                }
-
-                developers {
-                    developer {
-                        id.set("vctrl")
-                        name.set("vctrl")
-                    }
-                }
-
-                scm {
-                    url.set("https://github.com/vctrl/ktor-server-mcp")
-                    connection.set("scm:git:git://github.com/vctrl/ktor-server-mcp.git")
-                    developerConnection.set("scm:git:ssh://github.com/vctrl/ktor-server-mcp.git")
-                }
+        licenses {
+            license {
+                name.set("Apache License 2.0")
+                url.set("https://www.apache.org/licenses/LICENSE-2.0")
             }
         }
-    }
-}
 
-signing {
-    sign(publishing.publications["maven"])
+        developers {
+            developer {
+                id.set("pmokbel")
+                name.set("Paul Mokbel")
+                email.set("paul@mokbel.com")
+            }
+        }
+
+        scm {
+            url.set("https://github.com/vctrl/ktor-server-mcp")
+            connection.set("scm:git:git://github.com/vctrl/ktor-server-mcp.git")
+            developerConnection.set("scm:git:ssh://git@github.com/vctrl/ktor-server-mcp.git")
+        }
+    }
 }
