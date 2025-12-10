@@ -20,6 +20,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.ListToolsRequest
 import io.modelcontextprotocol.kotlin.sdk.types.ListToolsResult
 import io.modelcontextprotocol.kotlin.sdk.types.Method
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
+import kotlinx.serialization.json.JsonObject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
 
@@ -123,7 +124,7 @@ private suspend fun ServerSSESession.handleSse(
                 if (handler != null) {
                     try {
                         val scope = ToolScope(
-                            args = request.params.arguments ?: emptyMap(),
+                            args = request.params.arguments ?: JsonObject(emptyMap()),
                             call = config.call
                         )
                         handler(scope)

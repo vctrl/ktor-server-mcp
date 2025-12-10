@@ -9,6 +9,15 @@ import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.Tool
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 
 /**
  * Create a CallToolResult with a single text content.
@@ -33,8 +42,8 @@ public fun errorResult(message: String): CallToolResult =
  */
 @KtorDsl
 public class ToolScope(
-    /** Tool arguments as a map. */
-    public val args: Map<String, Any?>,
+    /** Tool arguments as a JsonObject. */
+    public val args: JsonObject,
     /** The Ktor ApplicationCall for accessing sessions, principal, etc. */
     public val call: ApplicationCall
 )
@@ -53,33 +62,34 @@ public class ToolScope(
  */
 @KtorDsl
 public class HandleScope(
-    private val args: Map<String, Any?>,
+    private val args: JsonObject,
     /** The Ktor ApplicationCall for accessing sessions, principal, etc. */
     public val call: ApplicationCall
 ) {
+    private fun primitive(name: String): JsonPrimitive? = args[name] as? JsonPrimitive
+
     // Nullable accessors
     /** Get a string parameter, or null if missing/wrong type. */
-    public fun string(name: String): String? = args[name] as? String
+    public fun string(name: String): String? = primitive(name)?.contentOrNull
 
     /** Get an integer parameter, or null if missing/wrong type. */
-    public fun int(name: String): Int? = (args[name] as? Number)?.toInt()
+    public fun int(name: String): Int? = primitive(name)?.intOrNull
 
     /** Get a long parameter, or null if missing/wrong type. */
-    public fun long(name: String): Long? = (args[name] as? Number)?.toLong()
+    public fun long(name: String): Long? = primitive(name)?.longOrNull
 
     /** Get a double parameter, or null if missing/wrong type. */
-    public fun double(name: String): Double? = (args[name] as? Number)?.toDouble()
+    public fun double(name: String): Double? = primitive(name)?.doubleOrNull
 
     /** Get a boolean parameter, or null if missing/wrong type. */
-    public fun boolean(name: String): Boolean? = args[name] as? Boolean
+    public fun boolean(name: String): Boolean? = primitive(name)?.booleanOrNull
 
     /** Get a string list parameter, or null if missing/wrong type. */
-    @Suppress("UNCHECKED_CAST")
-    public fun stringList(name: String): List<String>? = args[name] as? List<String>
+    public fun stringList(name: String): List<String>? =
+        (args[name] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
 
-    /** Get an object parameter as a Map, or null if missing/wrong type. */
-    @Suppress("UNCHECKED_CAST")
-    public fun obj(name: String): Map<String, Any?>? = args[name] as? Map<String, Any?>
+    /** Get an object parameter as a JsonObject, or null if missing/wrong type. */
+    public fun obj(name: String): JsonObject? = args[name] as? JsonObject
 
     // Required accessors (throw if missing)
     /** Get a required string parameter. Throws if missing. */
@@ -95,7 +105,7 @@ public class HandleScope(
         boolean(name) ?: error("Missing required param: $name")
 
     /** Get a required object parameter. Throws if missing. */
-    public fun requireObj(name: String): Map<String, Any?> =
+    public fun requireObj(name: String): JsonObject =
         obj(name) ?: error("Missing required param: $name")
 
     /** Get a required string list parameter. Throws if missing. */
