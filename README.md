@@ -21,11 +21,11 @@ This library was built to bring MCP support to [ktor-server-oauth](https://githu
 
 ```kotlin
 dependencies {
-    implementation("com.vcontrol:ktor-server-mcp:0.2.1")
+    implementation("com.vcontrol:ktor-server-mcp:0.2.4")
     implementation("io.modelcontextprotocol:kotlin-sdk:0.8.1")
 
     // Recommended: OAuth 2.0 support
-    implementation("com.vcontrol:ktor-server-oauth:0.4.8")
+    implementation("com.vcontrol:ktor-server-oauth:0.4.10")
 }
 ```
 

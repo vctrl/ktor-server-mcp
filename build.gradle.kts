@@ -9,6 +9,7 @@ version = file("version.properties")
     .readLines().first { it.startsWith("version=") }.substringAfter("=")
 
 kotlin {
+    jvmToolchain(21)
     explicitApi()
 }
 
