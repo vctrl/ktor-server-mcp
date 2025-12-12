@@ -1,5 +1,5 @@
 plugins {
-    alias(libs.plugins.kotlinJvm)
+    alias(libs.plugins.kotlin.jvm)
     `java-library`
     id("com.vanniktech.maven.publish") version "0.30.0"
 }
@@ -15,19 +15,22 @@ kotlin {
 
 dependencies {
     // Ktor Server (API - exposed to consumers)
-    api(libs.ktorServerCore)
-    api(libs.ktorServerSse)
-    api(libs.ktorServerSessions)
+    api(libs.ktor.server.core)
+    api(libs.ktor.server.sse)
+    api(libs.ktor.server.sessions)
+
+    // Bearer sessions (for direct session access in streaming contexts)
+    implementation("com.vcontrol:ktor-bearer-sessions:0.2.0")
 
     // MCP SDK (API - exposed to consumers)
-    api(libs.mcpSdk)
+    api(libs.mcp.sdk)
 
     // Logging (implementation detail)
-    implementation(libs.kotlinLogging)
+    implementation(libs.kotlin.logging)
 
     // Testing
-    testImplementation(libs.ktorServerTests)
-    testRuntimeOnly(libs.slf4jSimple)
+    testImplementation(libs.ktor.server.tests)
+    testRuntimeOnly(libs.slf4j.simple)
 }
 
 // Maven Central publishing via vanniktech plugin

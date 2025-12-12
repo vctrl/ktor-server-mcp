@@ -21,11 +21,11 @@ This library was built to bring MCP support to [ktor-server-oauth](https://githu
 
 ```kotlin
 dependencies {
-    implementation("com.vcontrol:ktor-server-mcp:0.2.4")
+    implementation("com.vcontrol:ktor-server-mcp:0.3.0")
     implementation("io.modelcontextprotocol:kotlin-sdk:0.8.1")
 
     // Recommended: OAuth 2.0 support
-    implementation("com.vcontrol:ktor-server-oauth:0.4.10")
+    implementation("com.vcontrol:ktor-server-oauth:0.5.0")
 }
 ```
 
@@ -118,7 +118,7 @@ Pair with [ktor-server-oauth](https://github.com/vctrl/ktor-server-oauth) for OA
 ```kotlin
 fun Application.module() {
     install(OAuth) {
-        authorizationServer(LocalAuthServer) { openRegistration = true }
+        server { clients { registration = true } }  // Accept all registrations
     }
     install(OAuthSessions) {
         session<ApiKeySession>()
@@ -132,7 +132,7 @@ fun Application.module() {
             get { call.respondHtml { apiKeyForm() } }
             post {
                 call.sessions.set(ApiKeySession(call.receiveParameters()["api_key"]!!))
-                complete()
+                call.provision.complete()
             }
         }
 

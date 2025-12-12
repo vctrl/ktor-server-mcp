@@ -123,11 +123,13 @@ private suspend fun ServerSSESession.handleSse(
 
                 if (handler != null) {
                     try {
-                        val scope = ToolScope(
-                            args = request.params.arguments ?: JsonObject(emptyMap()),
-                            call = config.call
+                        // Create a ToolingCall for this invocation
+                        val toolingCall = ToolingCall(
+                            sseCall = config.sseCall,
+                            args = request.params.arguments ?: JsonObject(emptyMap())
                         )
-                        handler(scope)
+                        handler(toolingCall)
+                        toolingCall.result
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -142,7 +144,7 @@ private suspend fun ServerSSESession.handleSse(
         }
 
         // Let user configure the session with SDK methods (with call access)
-        config.configureBlock?.invoke(ConfigureScope(session, config.call))
+        config.configureBlock?.invoke(ConfigureScope(session, config.sseCall))
 
         session.onClose {
             logger.debug { "MCP connection closed: sessionId=${transport.sessionId}" }

@@ -8,9 +8,9 @@ import io.modelcontextprotocol.kotlin.sdk.types.Icon
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.Tool
+import io.modelcontextprotocol.kotlin.sdk.types.ToolAnnotations
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -21,6 +21,7 @@ import kotlinx.serialization.json.longOrNull
 
 /**
  * Create a CallToolResult with a single text content.
+ * For use outside of tool handlers or for building custom results.
  */
 public fun textResult(text: String): CallToolResult =
     CallToolResult(content = listOf(TextContent(text = text)))
@@ -38,34 +39,27 @@ public fun errorResult(message: String): CallToolResult =
     CallToolResult(content = listOf(TextContent(text = message)), isError = true)
 
 /**
- * Context for tool handlers. Provides access to arguments and the Ktor call.
- */
-@KtorDsl
-public class ToolScope(
-    /** Tool arguments as a JsonObject. */
-    public val args: JsonObject,
-    /** The Ktor ApplicationCall for accessing sessions, principal, etc. */
-    public val call: ApplicationCall
-)
-
-/**
- * Context for handle { } blocks in the new DSL. Provides typed accessors for parameters.
+ * Context for handle { } blocks. Provides typed parameter accessors and Ktor-like call access.
+ *
+ * Use `call.sessions` for session access and `call.respond()` / `call.respondText()` for responses.
  *
  * Example:
  * ```kotlin
  * handle {
  *     val name = requireString("name")
- *     val age = int("age") ?: 0
- *     textResult("Hello $name, age $age")
+ *     val session = call.sessions.get<MySession>()
+ *     call.sessions.set(session.copy(name = name))  // Works in SSE!
+ *     call.respondText("Hello $name")
  * }
  * ```
  */
 @KtorDsl
 public class HandleScope(
-    private val args: JsonObject,
-    /** The Ktor ApplicationCall for accessing sessions, principal, etc. */
-    public val call: ApplicationCall
+    /** The MCP tool call context with sessions, respond(), etc. */
+    public val call: ToolingCall
 ) {
+    private val args: JsonObject get() = call.args
+
     private fun primitive(name: String): JsonPrimitive? = args[name] as? JsonPrimitive
 
     // Nullable accessors
@@ -114,63 +108,182 @@ public class HandleScope(
 }
 
 /**
- * DSL builder for configuring a tool with schema and handler.
+ * DSL builder for tool annotations (behavioral hints for LLMs).
+ *
+ * All properties are **hints** - not guaranteed to provide faithful description of tool behavior.
  *
  * Example:
  * ```kotlin
- * tool("greet") {
- *     description = "Greet a user"
+ * annotations {
+ *     readOnlyHint = false      // Tool modifies state
+ *     destructiveHint = false   // But only additive changes
+ *     idempotentHint = true     // Safe to retry
+ *     openWorldHint = false     // Closed domain (e.g., internal data)
+ * }
+ * ```
+ */
+@KtorDsl
+public class ToolAnnotationsBuilder internal constructor() {
+    /**
+     * Human-readable title for the tool (takes precedence over Tool.title and Tool.name for display).
+     */
+    public var title: String? = null
+
+    /**
+     * If true, the tool does not modify its environment.
+     * Default: false (assumes tool may modify)
+     */
+    public var readOnlyHint: Boolean? = null
+
+    /**
+     * If true, the tool may perform destructive updates.
+     * Only meaningful when readOnlyHint = false.
+     * Default: true (assumes destructive if not read-only)
+     */
+    public var destructiveHint: Boolean? = null
+
+    /**
+     * If true, calling repeatedly with same arguments has no additional effect.
+     * Only meaningful when readOnlyHint = false.
+     * Default: false
+     */
+    public var idempotentHint: Boolean? = null
+
+    /**
+     * If true, tool may interact with external entities (open world).
+     * If false, tool's domain is closed (e.g., internal memory/data).
+     * Default: true
+     */
+    public var openWorldHint: Boolean? = null
+
+    internal fun build(): ToolAnnotations? {
+        // Return null if no annotations set (avoids empty object in JSON)
+        if (title == null && readOnlyHint == null && destructiveHint == null &&
+            idempotentHint == null && openWorldHint == null
+        ) {
+            return null
+        }
+        return ToolAnnotations(
+            title = title,
+            readOnlyHint = readOnlyHint,
+            destructiveHint = destructiveHint,
+            idempotentHint = idempotentHint,
+            openWorldHint = openWorldHint
+        )
+    }
+}
+
+/**
+ * DSL builder for configuring a tool with schema, annotations, and handler.
+ *
+ * Example:
+ * ```kotlin
+ * tool("update_contact") {
+ *     title = "Update Contact"
+ *     description = "Update a contact field"
+ *
+ *     annotations {
+ *         readOnlyHint = false
+ *         destructiveHint = false
+ *         idempotentHint = true
+ *     }
  *
  *     schema {
- *         string("name", "User's name", required = true)
- *         int("age", "User's age") { minimum = 0 }
+ *         string("field", "Field name to update", required = true)
+ *         string("value", "New value", required = true)
  *     }
  *
  *     handle {
- *         val name = requireString("name")
- *         textResult("Hello, $name!")
+ *         val field = requireString("field")
+ *         val value = requireString("value")
+ *         // ... update logic
+ *         call.respondText("Updated $field to $value")
  *     }
  * }
  * ```
  */
 @KtorDsl
 public class ToolBuilder internal constructor(
-    private val toolName: String,
-    private val mcpCall: ApplicationCall
+    private val toolName: String
 ) {
+    /**
+     * Human-readable display name for this tool.
+     * Note: [ToolAnnotations.title] takes precedence if set via [annotations] block.
+     */
+    public var title: String? = null
+
     /** Tool description shown to MCP clients. */
     public var description: String = ""
 
-    private var schemaBlock: (McpSchemaBuilder.() -> Unit)? = null
-    private var handleBlock: (suspend HandleScope.() -> CallToolResult)? = null
+    /** Icons representing this tool. Clients must support PNG and JPEG; should support SVG and WebP. */
+    public var icons: List<Icon>? = null
+
+    /** Arbitrary metadata for vendor-specific extensions. */
+    public var meta: JsonObject? = null
+
+    private var inputSchemaBlock: (McpSchemaBuilder.() -> Unit)? = null
+    private var outputSchemaBlock: (McpSchemaBuilder.() -> Unit)? = null
+    private var annotationsBlock: (ToolAnnotationsBuilder.() -> Unit)? = null
+    private var handleBlock: (suspend HandleScope.() -> Unit)? = null
 
     /**
      * Define the tool's input schema.
      */
     public fun schema(block: McpSchemaBuilder.() -> Unit) {
-        schemaBlock = block
+        inputSchemaBlock = block
     }
 
     /**
-     * Define the tool's handler. Runs when the tool is called.
+     * Define the tool's output schema (optional).
+     * Defines structure of [CallToolResult.structuredContent].
      */
-    public fun handle(block: suspend HandleScope.() -> CallToolResult) {
+    public fun outputSchema(block: McpSchemaBuilder.() -> Unit) {
+        outputSchemaBlock = block
+    }
+
+    /**
+     * Define behavioral hints for LLMs about this tool.
+     */
+    public fun annotations(block: ToolAnnotationsBuilder.() -> Unit) {
+        annotationsBlock = block
+    }
+
+    /**
+     * Define the tool's handler. Use `call.respond()` or `call.respondText()` to set the result.
+     */
+    public fun handle(block: suspend HandleScope.() -> Unit) {
         handleBlock = block
     }
 
     internal fun build(): BuiltTool {
-        val schema = schemaBlock?.let { McpSchemaBuilder().apply(it).build() } ?: ToolSchema()
+        val inputSchema = inputSchemaBlock?.let { McpSchemaBuilder().apply(it).build() } ?: ToolSchema()
+        val outputSchema = outputSchemaBlock?.let { McpSchemaBuilder().apply(it).build() }
+        val annotations = annotationsBlock?.let { ToolAnnotationsBuilder().apply(it).build() }
         val handler = handleBlock ?: error("handle { } block is required")
-        return BuiltTool(toolName, description, schema, handler, mcpCall)
+        return BuiltTool(
+            name = toolName,
+            title = title,
+            description = description,
+            inputSchema = inputSchema,
+            outputSchema = outputSchema,
+            annotations = annotations,
+            icons = icons,
+            meta = meta,
+            handler = handler
+        )
     }
 }
 
 internal data class BuiltTool(
     val name: String,
+    val title: String?,
     val description: String,
-    val schema: ToolSchema,
-    val handler: suspend HandleScope.() -> CallToolResult,
-    val call: ApplicationCall
+    val inputSchema: ToolSchema,
+    val outputSchema: ToolSchema?,
+    val annotations: ToolAnnotations?,
+    val icons: List<Icon>?,
+    val meta: JsonObject?,
+    val handler: suspend HandleScope.() -> Unit
 )
 
 /**
@@ -188,14 +301,14 @@ public class ConfigureScope(
  * Configuration for an MCP endpoint.
  *
  * The configuration block is invoked when each SSE connection is established,
- * providing access to [call] for sessions, principal, and other request context.
+ * providing access to the SSE connection context for sessions, principal, etc.
  */
 @KtorDsl
 public class McpConfig internal constructor(
     /**
-     * The Ktor ApplicationCall for accessing sessions, principal, etc.
+     * The SSE connection's ApplicationCall. Used to create ToolingCalls per tool invocation.
      */
-    public val call: ApplicationCall
+    internal val sseCall: ApplicationCall
 ) {
     /** Server name shown to MCP clients. */
     public var name: String = "mcp-server"
@@ -216,26 +329,20 @@ public class McpConfig internal constructor(
     public var capabilities: ServerCapabilities = ServerCapabilities()
 
     internal val tools = mutableListOf<Tool>()
-    internal val toolHandlers = mutableMapOf<String, suspend ToolScope.() -> CallToolResult>()
+    internal val toolHandlers = mutableMapOf<String, suspend ToolingCall.() -> Unit>()
     internal var configureBlock: (suspend ConfigureScope.() -> Unit)? = null
 
     /**
-     * Register a tool with a handler.
+     * Register a tool with a simple handler.
      *
-     * Use [textResult] helper for simple text responses.
-     * Exceptions are caught and returned as error results.
+     * The handler receives a [ToolingCall] and should call `call.respond()` or `call.respondText()`.
      *
      * Example:
      * ```kotlin
      * mcp("/mcp") {
-     *     val user = call.sessions.get<UserSession>()
-     *
      *     tool("whoami", "Returns current user") {
-     *         textResult("Hello, ${user?.name ?: "stranger"}!")
-     *     }
-     *
-     *     tool("multi", "Returns multiple items") {
-     *         textResult("First", "Second", "Third")
+     *         val user = sessions.get<UserSession>()
+     *         respondText("Hello, ${user?.name ?: "stranger"}!")
      *     }
      * }
      * ```
@@ -244,7 +351,7 @@ public class McpConfig internal constructor(
         name: String,
         description: String,
         inputSchema: ToolSchema = ToolSchema(),
-        handler: suspend ToolScope.() -> CallToolResult
+        handler: suspend ToolingCall.() -> Unit
     ) {
         tools.add(Tool(name = name, description = description, inputSchema = inputSchema))
         toolHandlers[name] = handler
@@ -253,11 +360,18 @@ public class McpConfig internal constructor(
     /**
      * Register a tool using the DSL builder.
      *
+     * Use `call.respond()` or `call.respondText()` to set the result.
+     *
      * Example:
      * ```kotlin
      * mcp("/mcp") {
      *     tool("greet") {
-     *         description = "Greet a user"
+     *         title = "Greet User"
+     *         description = "Greet a user by name"
+     *
+     *         annotations {
+     *             readOnlyHint = true  // Doesn't modify state
+     *         }
      *
      *         schema {
      *             string("name", "User's name", required = true)
@@ -267,20 +381,31 @@ public class McpConfig internal constructor(
      *         handle {
      *             val name = requireString("name")
      *             val age = int("age") ?: 0
-     *             textResult("Hello $name, age $age")
+     *             call.respondText("Hello $name, age $age")
      *         }
      *     }
      * }
      * ```
      */
     public fun tool(name: String, block: ToolBuilder.() -> Unit) {
-        val builder = ToolBuilder(name, call)
+        val builder = ToolBuilder(name)
         builder.block()
         val built = builder.build()
 
-        tools.add(Tool(name = built.name, description = built.description, inputSchema = built.schema))
+        tools.add(
+            Tool(
+                name = built.name,
+                title = built.title,
+                description = built.description,
+                inputSchema = built.inputSchema,
+                outputSchema = built.outputSchema,
+                annotations = built.annotations,
+                icons = built.icons,
+                meta = built.meta
+            )
+        )
         toolHandlers[name] = {
-            val scope = HandleScope(this.args, built.call)
+            val scope = HandleScope(this)
             built.handler(scope)
         }
     }
@@ -289,7 +414,7 @@ public class McpConfig internal constructor(
      * Configure the MCP ServerSession directly using SDK methods.
      *
      * Provides full access to SDK features via [ConfigureScope.server].
-     * Ktor call available via [ConfigureScope.call].
+     * Ktor SSE call available via [ConfigureScope.call].
      *
      * Example:
      * ```kotlin
